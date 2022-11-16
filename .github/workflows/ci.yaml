@@ -1,0 +1,52 @@
+# Copyright (c) 2022 Graphcore Ltd. All rights reserved.
+name: CI
+on:
+  workflow_dispatch:
+  pull_request:
+  schedule:
+    - cron: "0 1 * * *"
+defaults:
+  run:
+    shell: bash
+jobs:
+  # Workflow which cancels any previous jobs from the same PR (to conserve resources)
+  cancel_previous:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel Previous Workflows For Same PR
+        uses: styfle/cancel-workflow-action@0.10.0
+        with:
+          access_token: ${{ github.token }}
+  ci:
+    runs-on: [self-hosted, applications, linux, pod]
+    container:
+      image: graphcore/pytorch:3.0.0-ubuntu-20.04
+      options: --pull=always --ulimit memlock=-1:-1 --cap-add=IPC_LOCK --device=/dev/infiniband/ -e IPUOF_VIPU_API_HOST -e IPUOF_VIPU_API_PARTITION_ID --shm-size=128G
+    steps:
+      - name: Install Git
+        run: apt-get update && apt-get install -y git
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+        with:
+          submodules: true
+      - name: Attach RDMA Network
+        run: |
+          python3 -m pip install docker
+          python3 -c "import docker; client=docker.from_env(); client.networks.get('macvlan_rdma_swarm').connect(client.containers.get('${{ job.container.id }}'))"
+      - name: Install requirements
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get install -yq $(cat requirements-apt.txt  | tr "\n" " ")
+          pip3 install -r requirements-dev.txt
+      - name: Run CI
+        run: ./dev ci
+  slack_notify:
+    name: Slack Notify
+    needs: [ci]
+    if: always()
+    uses: graphcore/github-actions-internal/.github/workflows/slack_notify.yaml@main
+    secrets:
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      CI_SLACK_CHANNEL_ID: ${{ secrets.CI_SLACK_CHANNEL_ID }}
+    with:
+      ci-result: ${{ needs.ci.result }}
