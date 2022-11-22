@@ -1,0 +1,14 @@
+.ninja_deps
+.ninja_log
+.ssub.yaml
+.venv
+.vscode
+__pycache__
+
+/build
+/data
+/local
+/localdata
+/out
+/third_party/poplar
+/wandb

@@ -1,0 +1,336 @@
+#!/usr/bin/env python3
+# Copyright (c) 2022 Graphcore Ltd. All rights reserved.
+
+"""Dev task launcher for LscWikiKG."""
+
+import argparse
+import collections
+import json
+import os
+import subprocess
+import sys
+import sysconfig
+from pathlib import Path
+from types import TracebackType
+from typing import Any, Callable, Dict, Iterable, List, Optional, Type, TypeVar
+
+# Utilities
+
+
+def run(command: Iterable[Any], env: Dict[str, str] = {}) -> None:
+    """Run a command, terminating on failure."""
+    cmd = [str(arg) for arg in command if arg is not None]
+    print("$ " + " ".join(cmd), file=sys.stderr)
+    environ = os.environ.copy()
+    environ.update(env)
+    cwd = os.getcwd()
+    environ["PYTHONPATH"] = ":".join(
+        [
+            environ.get("PYTHONPATH", ""),
+            f"{cwd}/build",
+            f"{cwd}/src/python",
+            f"{cwd}/tests/python",
+        ]
+    )
+    exit_code = subprocess.call(cmd, env=environ)
+    if exit_code:
+        sys.exit(exit_code)
+
+
+T = TypeVar("T")
+
+
+def cli(*args: Any, **kwargs: Any) -> Callable[[T], T]:
+    """Declare a CLI command / arguments for that command."""
+
+    def wrap(func: T) -> T:
+        if not hasattr(func, "cli_args"):
+            setattr(func, "cli_args", [])
+        if args or kwargs:
+            getattr(func, "cli_args").append((args, kwargs))
+        return func
+
+    return wrap
+
+
+class _NinjaFile:
+    """Basic builder for .ninja files."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        path.parent.mkdir(exist_ok=True, parents=True)
+        self.file = open(path, "w")
+
+    def __enter__(self) -> "_NinjaFile":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        self.file.close()
+
+    def write(self, *block: str) -> None:
+        """Write a declaration or rule to the file."""
+        print("\n    ".join(block), file=self.file)
+
+    def blank(self) -> None:
+        """Insert a blank line (for readability)."""
+        self.file.write("\n")
+
+
+# Commands
+
+PY_FOLDERS = ["dev", "src/python", "tests/python", "scripts"]
+
+
+@cli("targets", nargs="*", help="targets to build")
+def build(targets: List[str]) -> None:
+    """build C++ shared libraries and tests"""
+    build_root = Path("build")
+    with _NinjaFile(build_root / "build.ninja") as ninja:
+        poplar = os.environ["POPLAR_SDK_ENABLED"]
+        cxx = os.environ.get("CXX", "clang++")
+        ninja.write(
+            f"cpppath = -Isrc -isystem {poplar}/include -Ithird_party/pybind11/include"
+            f" -Ithird_party/catch2/single_include -I{sysconfig.get_path('include')}"
+        )
+        ninja.write(
+            "cppflags = -Wall -Wextra -Werror -Wno-unused-function -std=c++17 -O2 -g -fPIC"
+            + (" -fcolor-diagnostics" if cxx == "clang++" else "")
+        )
+        ninja.write("linkflags = $cppflags -Wl,--no-undefined")
+        ninja.write(
+            f"libs = {sysconfig.get_config_var('BLDLIBRARY')}"
+            " -lpoplar -lpopops -lpoputil -lpoplin -lpopnn -lgcl -lpoprand"
+        )
+        ninja.write()
+
+        ninja.write(
+            "rule compile",
+            f"command = {cxx} -MD -MF$out.d $cppflags $cpppath -c $in -o $out",
+            "deps = gcc",
+            "depfile = $out.d",
+        )
+        ninja.write()
+        ninja.write(
+            "rule linkso",
+            f"command = {cxx} $linkflags -shared $in -o $out $libs",
+        )
+        ninja.write()
+        ninja.write(
+            "rule linkexe",
+            f"command = {cxx} $linkflags $in -o $out $libs",
+        )
+        ninja.write()
+
+        ninja.write(
+            "rule popc",
+            "command = popc -Wall -Wextra -Werror -Wold-style-cast -O2 -g --target=cpu,ipu1,ipu2 $in -o $out",
+        )
+        ninja.write()
+
+        # Compile
+        objs = collections.defaultdict(list)
+        for src_root in [Path("src"), Path("tests")]:
+            for cpp_file in src_root.glob("**/*.cpp"):
+                if ".codelet" not in cpp_file.suffixes:
+                    obj_file = build_root / "obj" / cpp_file.with_suffix(".obj")
+                    ninja.write(f"build {obj_file}: compile {cpp_file}")
+                    objs[src_root.name].append(obj_file)
+        ninja.write()
+
+        # Compile codelets
+        codelets_src = list(Path("src/poplar_extensions").glob("*.codelet.cpp"))
+        codelets_gp = build_root / "poplar_extensions.gp"
+        ninja.write(f"build {codelets_gp}: popc {' '.join(map(str, codelets_src))}")
+
+        # Link
+        ninja.write(
+            f"build {build_root}/libpoplar_kge.so:"
+            f" linkso {' '.join(map(str, objs['src']))} | {codelets_gp}"
+        )
+        ninja.write(
+            f"build {build_root}/tests:"
+            f" linkexe {' '.join(map(str, objs['src'] + objs['tests']))} | {codelets_gp}"
+        )
+
+    run(["ninja", "-f", str(ninja.path)] + targets)
+
+
+@cli("-k", "--filter")
+@cli("--gdb", action="store_true")
+@cli("--profile", type=Path, help="run profiling, to this path")
+def tests_cpp(filter: Optional[str], gdb: bool, profile: Optional[Path]) -> None:
+    """run C++ tests"""
+    build(["build/tests"])
+    prefix, suffix = [], []
+    if gdb:
+        prefix = ["gdb", "-ex", "catch throw", "-ex", "run", "--args"]
+        suffix = ["--abort", "--break"]
+    env = {}
+    if profile:
+        profile.mkdir(parents=True, exist_ok=True)
+        env["POPLAR_ENGINE_OPTIONS"] = json.dumps(
+            {
+                "autoReport.all": "true",
+                "autoReport.directory": str(profile),
+                "autoReport.outputArchive": False,
+            }
+        )
+    if not filter:
+        filter = "~[benchmark]"
+    run(prefix + ["./build/tests", filter] + suffix, env=env)
+
+
+@cli("-k", "--filter")
+@cli("--gdb", action="store_true")
+def tests_py(filter: Optional[str], gdb: bool) -> None:
+    """run Python tests"""
+    build(["build/libpoplar_kge.so"])
+    prefix = []
+    if gdb:
+        prefix = ["gdb", "-ex", "catch throw", "-ex", "run", "--args"]
+    run(
+        prefix
+        + [
+            "python",
+            "-m",
+            "pytest",
+            "-rA",
+            "tests/python",
+            *(["-k", filter] if filter else []),
+        ]
+    )
+
+
+@cli()
+def tests() -> None:
+    """run all tests"""
+    tests_cpp(filter=None, gdb=False, profile=None)
+    tests_py(filter=None, gdb=False)
+
+
+@cli("command", nargs="*")
+@cli("-w", "--wrap", choices=("gdb", "cprofile"))
+def python(command: List[Any], wrap: str) -> None:
+    build([])
+    prefix: List[Any] = []
+    if wrap == "gdb":
+        prefix = ["gdb", "-ex", "catch throw", "-ex", "run", "--args", "python"]
+    elif wrap == "cprofile":
+        prefix = ["python", "-m", "cProfile", "-s", "cumtime"]
+    else:
+        prefix = ["python"]
+    run(prefix + command)
+
+
+@cli("output", nargs="?", type=Path)
+@cli("-w", "--wrap", choices=("gdb", "cprofile"))
+def profile(output: Optional[Path], wrap: str) -> None:
+    """run a profile script for a single training step"""
+    python(["scripts/run_profile.py", output], wrap=wrap)
+
+
+@cli("-w", "--wrap", choices=("gdb", "cprofile"))
+def train(wrap: str) -> None:
+    """run a profile script for a single training step"""
+    python(["scripts/run_training.py"], wrap=wrap)
+
+
+@cli()
+def lint() -> None:
+    """run static analysis"""
+    run(["flake8", *PY_FOLDERS])
+    run(["mypy", *PY_FOLDERS])
+
+
+@cli("--check", action="store_true")
+def format(check: bool, isort: bool = True) -> None:
+    """autoformat all sources"""
+    cpp_files = [*Path("src").glob("**/*.[ch]pp"), *Path("tests").glob("**/*.[ch]pp")]
+    if check:
+        output = subprocess.check_output(
+            ["clang-format", "-output-replacements-xml", *map(str, cpp_files)]
+        ).decode()
+        if "</replacement>" in output:
+            print("Some C++ files need formatting, please run ./dev format")
+            sys.exit(1)
+    else:
+        run(["clang-format", "-i", *cpp_files])
+    run(["black", "--check" if check else None, *PY_FOLDERS])
+    if isort:
+        run(["isort", "--check" if check else None, *PY_FOLDERS])
+
+
+@cli("--port", type=int)
+def lab(port: Optional[int] = None) -> None:
+    """start a jupyter lab server"""
+    run(
+        [
+            "python",
+            "-m",
+            "jupyter",
+            "lab",
+            "--ip",
+            "*",
+            *(["--port", port] if port else []),
+        ]
+    )
+
+
+@cli()
+def check_copyright_headers() -> None:
+    """check for Graphcore copyright headers on relevant files"""
+    command = (
+        "find dev scripts/ src/ tests/ -type f -not -name *.pyc"
+        " | xargs grep -L 'Copyright (c) 202. Graphcore Ltd[.] All rights reserved[.]'"
+    )
+    print(f"$ {command}", file=sys.stderr)
+    # Note: grep exit codes are not consistent between versions, so we don't use check=True
+    output = (
+        subprocess.run(
+            command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+        )
+        .stdout.decode()
+        .strip()
+    )
+    if output:
+        print(output, file=sys.stderr)
+        sys.exit(1)
+
+
+@cli()
+def ci() -> None:
+    """run all continuous integration tests & checks"""
+    tests()
+    lint()
+    # Because of https://github.com/PyCQA/isort/issues/1889
+    format(check=True, isort=False)
+    check_copyright_headers()
+
+
+# Script
+
+
+def _main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.set_defaults(action=lambda: ci())
+
+    subs = parser.add_subparsers()
+    for key, value in globals().items():
+        if hasattr(value, "cli_args"):
+            sub = subs.add_parser(key.replace("_", "-"), help=value.__doc__)
+            for args, kwargs in value.cli_args:
+                sub.add_argument(*args, **kwargs)
+            sub.set_defaults(action=value)
+
+    cli_args = vars(parser.parse_args())
+    action = cli_args.pop("action")
+    action(**cli_args)
+
+
+if __name__ == "__main__":
+    _main()

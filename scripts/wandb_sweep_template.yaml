@@ -1,0 +1,26 @@
+# Copyright (c) 2022 Graphcore Ltd. All rights reserved.
+
+command:
+  - ./dev
+  - train
+method: bayes
+metric:
+  goal: maximize
+  name: valid_mrr
+# N.B to specify nested parameters, you must specify
+# that the parent parameter has parameters...
+parameters:
+  training:
+    parameters:
+      learning_rate:
+        distribution: log_uniform_values
+        max: 0.001
+        min: 1e-05
+      feature_regularisation:
+        parameters:
+          weight:
+            distribution: log_uniform_values
+            max: 0.0001
+            min: 1e-06
+      learning_rate_modifiers:
+        value: {}
