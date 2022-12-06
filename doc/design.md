@@ -1,6 +1,6 @@
 # The design of Poplar KGE, PAG & Fructose
 
-This document covers code structure and design, for a detailed description of the models and execution scheme, please see our [technical report]().
+This document covers code structure and design, for a detailed description of the models and execution scheme, please see our [technical report](https://arxiv.org/abs/2211.12281).
 
 ## System architecture
 

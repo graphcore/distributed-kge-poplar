@@ -37,9 +37,12 @@ Our standard training script is in [scripts/run_training.py](scripts/run_trainin
 ./dev train
 ```
 
-This script expects the OGB WikiKG90Mv2 dataset to be downloaded to `$OGBWIKIKG_PATH`, see the [OGB WikiKG90Mv2 page](https://ogb.stanford.edu/docs/lsc/wikikg90mv2/) for instructions.
+This trains a TransE model with embedding size 256.
 
-Note that build and develelopment automation is provided by the `./dev` script, which generates a ninja build file (`build/build.ninja`).
+Note:
+ - Build and develelopment automation is provided by the `./dev` script, which generates a ninja build file (`build/build.ninja`).
+ - You may wish to change C++ compiler, e.g. `env CXX=g++ ./dev ...`
+ - The training script expects the OGB WikiKG90Mv2 dataset to be downloaded to `$OGBWIKIKG_PATH`; see the [OGB WikiKG90Mv2 page](https://ogb.stanford.edu/docs/lsc/wikikg90mv2/) for instructions.
 
 
 ## About
