@@ -4,6 +4,7 @@
 
 #include <catch2/catch.hpp>
 
+#include <poplar/CSRFunctions.hpp>
 #include <poplar/DeviceManager.hpp>
 #include <poplar/Engine.hpp>
 #include <poplar/Graph.hpp>
@@ -65,8 +66,9 @@ struct TestHelper {
     std::unordered_map<std::string, std::vector<size_t>> readTensors;
     std::unique_ptr<poplar::Engine> engine;
 
+    // Enables exceptions by default, but these will only occur on IPU/IPU_MODEL
     explicit TestHelper(unsigned nDevice = 1u,
-                        poplar::TargetType preferredType = poplar::TargetType::CPU)
+                        poplar::TargetType preferredType = poplar::TargetType::IPU_MODEL)
         : device(attach(nDevice, preferredType)),
           poplarGraph(device, poplar::replication_factor(nDevice)),
           graph(poplarGraph) {
@@ -74,6 +76,9 @@ struct TestHelper {
         poplin::addCodelets(poplarGraph);
         poprand::addCodelets(poplarGraph);
         poplarGraph.addCodelets("build/poplar_extensions.gp");
+        poplar::setFloatingPointBehaviour(
+            poplarGraph, tape.prog(),
+            {/*inv*/ true, /*div*/ true, /*oflo*/ true, /*esr*/ false, /*nanoo*/ false});
     }
 
     template <class T>
@@ -363,6 +368,29 @@ TEST_CASE("pag::ops::l2dist", "[pag]") {
                      .margin(margin));
 }
 
+TEST_CASE("pag::ops::l2dist-large", "[pag]") {
+    TestHelper test(1, poplar::TargetType::IPU);
+
+    std::vector<float> aData(2 * 5);
+    std::vector<float> bData(4 * 5);
+    std::iota(aData.begin(), aData.end(), 0.0f);
+    std::iota(bData.begin(), bData.end(), 0.0f);
+    auto a = test.tensor<float>({1, 5}, {100.0f, 200.0f, 300.0f, 400.0f, 500.0f}, poplar::HALF);
+    auto b = test.tensor<float>({1, 5}, {600.0f, 600.0f, 600.0f, 600.0f, 600.0f}, poplar::HALF);
+    auto c = pag::ops::l2distance(test.graph, a, b, test.tape);
+    test.tape.backward(test.graph, c);
+
+    test.read("c", c);
+    test.read("grad_a", test.graph.grad(a));
+
+    auto out = test.run();
+
+    using Catch::Matchers::Approx;
+    REQUIRE_THAT(out["c"].data, Approx<float>({741.62f}).margin(0.5f));
+    REQUIRE_THAT(out["grad_a"].data,
+                 Approx<float>({-0.6742, -0.5394, -0.4045, -0.2697, -0.1348}).margin(1e-3f));
+}
+
 TEST_CASE("pag::ops::cast", "[pag]") {
     TestHelper test;
 
@@ -428,7 +456,7 @@ TEST_CASE("pag::ops::pow-exponent>1", "[pag]") {
     TestHelper test;
 
     auto a = test.tensor<float>({3}, {1, -2, 3});
-    auto b = pag::ops::pow(test.graph, a, 3, /*safeGradZero=*/false, test.tape);
+    auto b = pag::ops::pow(test.graph, a, 3, test.tape);
     test.tape.backward(test.graph, b);
 
     test.read("b", b);
@@ -442,10 +470,10 @@ TEST_CASE("pag::ops::pow-exponent>1", "[pag]") {
 }
 
 TEST_CASE("pag::ops::pow-exponent<1", "[pag]") {
-    TestHelper test;
+    TestHelper test(1, poplar::TargetType::IPU);
 
     auto a = test.tensor<float>({4}, {0, 8, 27, 64});
-    auto b = pag::ops::pow(test.graph, a, 1. / 3., /*safeGradZero=*/true, test.tape);
+    auto b = pag::ops::pow(test.graph, a, 1. / 3., test.tape);
     test.tape.backward(test.graph, b);
 
     test.read("b", b);
@@ -851,7 +879,7 @@ pag::Tensor indexTensor(TestHelper& test, const std::vector<size_t>& shape) {
 }  // namespace
 
 TEST_CASE("pag::ops::allToAllCrossReplica", "[pag]") {
-    TestHelper test(/*nDevice*/ 2);
+    TestHelper test(/*nDevice*/ 2, poplar::TargetType::CPU);
 
     auto input = indexTensor(test, {2, 3});
     auto output = pag::ops::allToAllCrossReplica(test.graph, input, test.tape, {});
@@ -872,7 +900,7 @@ TEST_CASE("pag::ops::allToAllCrossReplica", "[pag]") {
 }
 
 TEST_CASE("pag::ops::reduceScatterCrossReplica", "[pag]") {
-    TestHelper test(/*nDevice*/ 2);
+    TestHelper test(/*nDevice*/ 2, poplar::TargetType::CPU);
 
     auto input = indexTensor(test, {6});
     auto output = pag::ops::reduceScatterCrossReplica(test.graph, input,
@@ -892,7 +920,7 @@ TEST_CASE("pag::ops::reduceScatterCrossReplica", "[pag]") {
 }
 
 TEST_CASE("pag::ops::allGatherCrossReplica", "[pag]") {
-    TestHelper test(/*nDevice*/ 2);
+    TestHelper test(/*nDevice*/ 2, poplar::TargetType::CPU);
 
     auto input = indexTensor(test, {3, 1});
     auto output = pag::ops::allGatherCrossReplica(test.graph, input, test.tape, {});

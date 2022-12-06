@@ -179,7 +179,6 @@ Tensor square(Graph& graph,
 Tensor pow(Graph& graph,
            const Tensor& A,
            float exponent,
-           bool safeGradZero,
            Tape& tape,
            const poplar::DebugContext& debugContext = {},
            const poplar::OptionFlags& options = {});

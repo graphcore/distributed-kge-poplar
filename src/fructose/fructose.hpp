@@ -113,7 +113,7 @@ void print(const std::string& message, const Tensor& tensor);
 Tensor abs(const Tensor& a);
 Tensor max(const Tensor& a, const Tensor& b);
 Tensor square(const Tensor& a);
-Tensor pow(const Tensor& a, float exponent, bool safeGradZero = false);
+Tensor pow(const Tensor& a, float exponent);
 Tensor sqrt(const Tensor& a);
 Tensor cbrt(const Tensor& a);
 Tensor sin(const Tensor& a);

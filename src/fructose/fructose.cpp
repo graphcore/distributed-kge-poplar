@@ -528,10 +528,10 @@ Tensor square(const Tensor& a) {
     return Tensor::wrap(pag::ops::square(f.graph, a.pag(), f.tape, f.di));
 }
 
-Tensor pow(const Tensor& a, float exponent, bool safeGradZero) {
+Tensor pow(const Tensor& a, float exponent) {
     Frame f("fr::ops::pow");
     mapping::setDefault(mapping::Linear(), {a});
-    return Tensor::wrap(pag::ops::pow(f.graph, a.pag(), exponent, safeGradZero, f.tape, f.di));
+    return Tensor::wrap(pag::ops::pow(f.graph, a.pag(), exponent, f.tape, f.di));
 }
 
 Tensor sqrt(const Tensor& a) {

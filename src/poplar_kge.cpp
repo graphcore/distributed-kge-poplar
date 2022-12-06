@@ -387,8 +387,7 @@ struct Model {
     }
 
     fr::Tensor lpnorm(const fr::Tensor& a, float p) {
-        return fr::ops::pow(fr::ops::sum(fr::ops::abs(fr::ops::pow(a, p)), {a.rank() - 1}), 1. / p,
-                            /*safeGradZero=*/true);
+        return fr::ops::pow(fr::ops::sum(fr::ops::abs(fr::ops::pow(a, p)), {a.rank() - 1}), 1. / p);
     }
 
     fr::Tensor l2distance(const fr::Tensor& a, const fr::Tensor& b) {

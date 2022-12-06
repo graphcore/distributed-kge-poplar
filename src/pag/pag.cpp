@@ -483,7 +483,6 @@ Tensor square(Graph& graph,
 Tensor pow(Graph& graph,
            const Tensor& A,
            float exponent,
-           bool safeGradZero,
            Tape& tape,
            const poplar::DebugContext& debugContext,
            const poplar::OptionFlags& options) {
@@ -495,12 +494,11 @@ Tensor pow(Graph& graph,
         tape.addBackwardOp([=](Graph& graph, poplar::program::Sequence& prog) {
             namespace pe = popops::expr;
             poplar::DebugContext di(debugContext, "grad");
-            auto expr = (pe::_1 * exponent * pe::Pow(pe::_2, pe::Const(exponent - 1.0f))).clone();
-            if (safeGradZero) {
-                expr = (pe::Select(*expr, pe::Const(0.0f), pe::_2 != 0.0f)).clone();
-            }
+            auto expr =
+                pe::_1 * exponent * pe::_2 / (pe::_3 + pe::Cast(pe::_3 == 0, poplar::FLOAT));
             auto grad =
-                popops::map(graph.poplar(), *expr, {graph.grad(output), graph.unwrap(A)}, prog, di);
+                popops::map(graph.poplar(), expr,
+                            {graph.grad(output), graph.unwrap(output), graph.unwrap(A)}, prog, di);
             graph.addGrad(A, grad, prog, di);
         });
     }
@@ -902,7 +900,7 @@ Tensor logSigmoid(Graph& graph,
     if (requiresGrad) {
         tape.addBackwardOp([=](Graph& graph, poplar::program::Sequence& prog) {
             poplar::DebugContext di(debugContext, "grad");
-            auto expr = pe::_1 * pe::Inv(1.0f + pe::Exp(pe::_2));
+            auto expr = pe::_1 * pe::Inv(1.0f + pe::Exp(pe::Min(pe::_2, pe::Const(11))));
             auto grad =
                 popops::map(graph.poplar(), expr, {graph.grad(output), graph.unwrap(t)}, prog, di);
             graph.addGrad(t, grad, prog, di);

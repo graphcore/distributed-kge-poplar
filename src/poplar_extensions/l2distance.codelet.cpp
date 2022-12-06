@@ -32,21 +32,19 @@ float l2dist(const float* a, const float* b, size_t size) {
 }
 
 float l2dist(const half* a, const half* b, size_t size) {
-    auto a4 = reinterpret_cast<const half4*>(a);
-    auto b4 = reinterpret_cast<const half4*>(b);
+    auto a2 = reinterpret_cast<const half2*>(a);
+    auto b2 = reinterpret_cast<const half2*>(b);
 
-    half4 sum = {0.0, 0.0, 0.0, 0.0};
-    for (size_t i = 0; i < size / 4; ++i) {
-        half4 diff = a4[i] - b4[i];
-        sum += diff * diff;
+    float2 sum = {0.0, 0.0};
+    for (size_t i = 0; i < size / 2; ++i) {
+        auto diff = a2[i] - b2[i];
+        float2 diff32 = {float(diff[0]), float(diff[1])};
+        sum += diff32 * diff32;
     }
-    float res = float(sum[0]) + float(sum[1]) + float(sum[2]) + float(sum[3]);
-    size_t rem = size % 4;
-    if (rem) {
-        for (size_t i = size - rem; i < size; ++i) {
-            float diff = float(a[i] - b[i]);
-            res += diff * diff;
-        }
+    auto res = sum[0] + sum[1];
+    if (size % 2) {
+        auto diff = float(a[size - 1] - b[size - 1]);
+        res += diff * diff;
     }
     return ipu::sqrt(res);
 }
