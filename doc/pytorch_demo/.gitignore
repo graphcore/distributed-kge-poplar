@@ -1,0 +1,12 @@
+.ipynb_checkpoints
+.ninja_deps
+.ninja_log
+__pycache__
+.venv
+.venvs
+.vscode
+
+/build
+/data
+/local
+/out

@@ -1,0 +1,11 @@
+# Copyright (c) 2022 Graphcore Ltd. All rights reserved.
+
+cppflags = -Wall -Wextra -Werror -std=c++17 -O2 -g -fPIC -DONNX_NAMESPACE=onnx
+
+rule buildso
+    command = g++ -MD -MF$out.d $cppflags -shared $in -o $out -Wl,--no-undefined $libs
+    deps = gcc
+    depfile = $out.d
+
+build build/custom_ops.so: buildso custom_ops.cpp
+    libs = -lpoplar -lpopart -lgcl
