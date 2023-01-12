@@ -4,6 +4,8 @@ IPU implementation of a sharded knowledge graph embedding (KGE) model, implement
 
 Note that this is a low-level implementation for advanced IPU usage.
 
+_See also: [PyTorch KGE demo notebook](doc/pytorch_demo)._
+
 
 ## Usage
 

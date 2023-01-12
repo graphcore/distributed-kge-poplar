@@ -1,5 +1,7 @@
 # Interactive KGE in PyTorch
 
+[![Gradient](https://assets.paperspace.io/img/gradient-badge.svg)](https://ipu.dev/3QwfKJS)
+
 An interactive training and evaluation demo of Knowledge Graph Embedding (KGE) model training on IPU in PyTorch.
 
 This demo is designed to be run interactively using an IPU notebook service. Please see [KgeModelling.ipynb](KgeModelling.ipynb) for a complete walkthrough.
