@@ -427,7 +427,9 @@ class Batch:
     a2a: np.ndarray  # .... uint32[n_shard x steps x n_shard x a2a_size] -- into remote
     head: np.ndarray  # ... uint32[n_shard x steps x batch_size] -- into remote
     relation: np.ndarray  # uint32[n_shard x steps x batch_size]
-    tail: np.ndarray  # ... uint32[n_shard x steps x batch_size] -- into remote[a2a].T.reshape(n_shard, -1)
+    tail: (
+        np.ndarray
+    )  # ... uint32[n_shard x steps x batch_size] -- into remote[a2a].T.reshape(n_shard, -1)
 
 
 @dataclasses.dataclass
